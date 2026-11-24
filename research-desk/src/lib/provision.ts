@@ -71,6 +71,31 @@ const AGENT_TOOLSET = {
   ],
 };
 
+/** Look up an existing custom skill by its display title (first match). */
+async function findSkillByTitle(baseUrl: string, displayTitle: string): Promise<{ skillId: string; version: string } | null> {
+  let page: string | undefined;
+  for (let i = 0; i < 20; i++) {
+    const url = new URL(`${baseUrl}/v1/skills`);
+    url.searchParams.set("source", "custom");
+    url.searchParams.set("limit", "100");
+    if (page) url.searchParams.set("page", page);
+    const response = await fetch(url, {
+      headers: { ...restAuthHeaders(SKILLS_BETA), "anthropic-version": "2023-06-01" },
+    });
+    if (!response.ok) return null;
+    const body = (await response.json().catch(() => ({}))) as {
+      data?: { id: string; display_title?: string; latest_version?: string | number }[];
+      has_more?: boolean;
+      next_page?: string | null;
+    };
+    const match = body.data?.find((s) => s.display_title === displayTitle);
+    if (match) return { skillId: match.id, version: String(match.latest_version ?? "latest") };
+    if (!body.has_more || !body.next_page) return null;
+    page = body.next_page;
+  }
+  return null;
+}
+
 /**
  * Upload skills/edgartools as a custom Skill via the Skills API (multipart).
  * Returns { skillId, version }.
@@ -98,6 +123,12 @@ async function uploadSkill(displayTitle: string): Promise<{ skillId: string; ver
   });
   const body = (await response.json().catch(() => ({}))) as { id?: string; latest_version?: string | number };
   if (!response.ok) {
+    // A previous (possibly failed) "Staff the desk" may already have uploaded
+    // this skill: display titles must be unique, so reuse the existing one.
+    if (response.status === 400 && JSON.stringify(body).includes("display_title")) {
+      const existing = await findSkillByTitle(baseUrl, displayTitle);
+      if (existing) return existing;
+    }
     throw new Error(`skill upload failed (${response.status}): ${JSON.stringify(body).slice(0, 400)}`);
   }
   return { skillId: body.id ?? "", version: String(body.latest_version ?? "latest") };
