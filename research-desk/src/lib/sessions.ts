@@ -63,25 +63,19 @@ export async function defineOutcome(
   rubric: string,
   maxIterations = 2,
 ): Promise<void> {
-  // TODO(workshop-6): kick the session off with an outcome instead of a plain message.
-  //
   // An outcome means: describe what "done" looks like, attach a rubric, and the
   // platform's grader iterates the agent until the rubric is satisfied (or
-  // max_iterations is hit). The description IS the task — no separate
-  // user.message. Send exactly ONE event via
-  // `await client.beta.sessions.events.send(sessionId, { events: [...] })`:
-  //   {
-  //     type: "user.define_outcome",
-  //     description,
-  //     rubric: { type: "text", content: rubric },
-  //     max_iterations: maxIterations,
-  //   }
-  void client;
-  void sessionId;
-  void description;
-  void rubric;
-  void maxIterations;
-  throw new Error("TODO(workshop-6): send the user.define_outcome event in defineOutcome");
+  // max_iterations is hit). The description IS the task — no separate user.message.
+  await client.beta.sessions.events.send(sessionId, {
+    events: [
+      {
+        type: "user.define_outcome",
+        description,
+        rubric: { type: "text", content: rubric },
+        max_iterations: maxIterations,
+      },
+    ],
+  });
 }
 
 /**

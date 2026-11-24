@@ -170,53 +170,51 @@ class DeskOrchestrator {
     this.dispatches.set(dispatch.id, dispatch);
     logEvent("info", "dispatch_started", { tool_use_id: toolUseId, tickers });
 
-    // TODO(workshop-7): the head just called its custom tool, and its session is
-    // now idle at requires_action — the platform is waiting on THIS SERVER to answer.
-    //
-    //   1. Run the fan-out and compile the result payload (a JSON string):
-    //        const cfg: DeskConfig = loadConfig();
-    //        await analyzeMany(client, cfg, tickers, { focus, concurrency: DEFAULT_CONCURRENCY, records: dispatch.records });
-    //        const resultPayload = compileDispatchResult(dispatch.records);
-    //      Handle tickers.length === 0 and exceptions by building a failure payload
-    //      instead (JSON with a `failures` array), and keep dispatch.status /
-    //      dispatch.error / dispatch.finishedAt truthful so the UI's progress
-    //      panel stays honest.
-    //   2. Send the answer back so the head can resume — the id ties the result
-    //      to this exact tool call:
-    //        await client.beta.sessions.events.send(headSessionId, {
-    //          events: [
-    //            {
-    //              type: "user.custom_tool_result",
-    //              custom_tool_use_id: toolUseId,
-    //              content: [{ type: "text", text: resultPayload }],
-    //            },
-    //          ],
-    //        } as never);
-    void analyzeMany;
-    void compileDispatchResult;
-    void loadConfig;
-    void DEFAULT_CONCURRENCY;
-    void focus;
-    dispatch.status = "failed";
-    dispatch.error = "TODO(workshop-7): answer dispatch_analysts with a user.custom_tool_result";
-    dispatch.finishedAt = Date.now();
-    logEvent("error", "dispatch_unhandled", { tool_use_id: toolUseId, error: dispatch.error });
-    throw new Error(dispatch.error);
+    // The head's session is now idle at requires_action — the platform is
+    // waiting on THIS SERVER to answer. Run the fan-out, then post the result
+    // back tied to the tool-use id so the head can resume.
+    let resultPayload: string;
+    try {
+      if (tickers.length === 0) {
+        resultPayload = JSON.stringify({ scorecards: [], failures: [{ ticker: "", error: "no tickers provided" }] });
+      } else {
+        const cfg: DeskConfig = loadConfig();
+        await analyzeMany(client, cfg, tickers, {
+          focus,
+          concurrency: DEFAULT_CONCURRENCY,
+          records: dispatch.records,
+        });
+        resultPayload = compileDispatchResult(dispatch.records);
+      }
+      dispatch.status = "completed";
+    } catch (error) {
+      dispatch.status = "failed";
+      dispatch.error = error instanceof Error ? error.message : String(error);
+      resultPayload = JSON.stringify({ scorecards: [], failures: [{ ticker: "", error: dispatch.error }] });
+      logEvent("error", "dispatch_failed", { tool_use_id: toolUseId, error: dispatch.error });
+    } finally {
+      dispatch.finishedAt = Date.now();
+    }
+
+    await client.beta.sessions.events.send(headSessionId, {
+      events: [
+        {
+          type: "user.custom_tool_result",
+          custom_tool_use_id: toolUseId,
+          content: [{ type: "text", text: resultPayload }],
+        },
+      ],
+    } as never);
+    logEvent("info", "dispatch_answered", { tool_use_id: toolUseId, status: dispatch.status });
   }
 
   /** Send a user message to the head, making sure the session and watcher exist. */
   async sendToHead(text: string): Promise<string> {
     const client = getClient();
     const sessionId = await this.ensureHeadSession();
-    // TODO(workshop-1): a chat message is one event appended to the session's log.
-    //
-    // Send it with:
-    //   await client.beta.sessions.events.send(sessionId, {
-    //     events: [{ type: "user.message", content: [{ type: "text", text }] }],
-    //   });
-    void client;
-    void text;
-    throw new Error("TODO(workshop-1): send the user.message event in sendToHead (src/lib/orchestrator.ts)");
+    await client.beta.sessions.events.send(sessionId, {
+      events: [{ type: "user.message", content: [{ type: "text", text }] }],
+    });
     return sessionId;
   }
 

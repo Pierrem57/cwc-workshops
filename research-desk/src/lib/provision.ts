@@ -33,29 +33,34 @@ const ALLOWED_HOSTS = [
   "files.pythonhosted.org",
 ];
 
-// TODO(workshop-4): define the head of research's custom tool.
-//
-// A custom tool is a contract, not code: the platform never executes it — when
-// the head calls it, the session goes idle with requires_action and THIS
-// SERVER (Act 5, the orchestrator) supplies the result. Replace `null` with an
-// object of exactly this shape:
-//
-//   {
-//     type: "custom",
-//     name: "dispatch_analysts",
-//     description: "<tell the head WHEN to use it: fresh, validated scorecards for tickers the desk has no
-//                    current notes on in memory; each analyst also writes a research note to the shared
-//                    memory; not for companies whose notes already answer the question>",
-//     input_schema: {
-//       type: "object",
-//       properties: {
-//         tickers: { type: "array", items: { type: "string" }, description: "Tickers to analyze, one analyst per ticker" },
-//         focus: { type: "string", description: "Optional angle for the analysts to emphasize" },
-//       },
-//       required: ["tickers"],
-//     },
-//   }
-const DISPATCH_TOOL: Record<string, unknown> | null = null;
+// The head of research's custom tool. A custom tool is a contract, not code:
+// the platform never executes it — when the head calls it, the session goes
+// idle with requires_action and THIS SERVER (the orchestrator) supplies the
+// result.
+const DISPATCH_TOOL: Record<string, unknown> | null = {
+  type: "custom",
+  name: "dispatch_analysts",
+  description:
+    "Dispatch the desk's filing analysts to produce fresh, validated scorecards for the given tickers. " +
+    "Use this when you need current analysis for companies the desk has no up-to-date notes on in memory. " +
+    "Each analyst reads the company's latest SEC filings, returns a structured scorecard, and writes a " +
+    "research note to the desk's shared memory. Do not call it for companies whose notes already answer the question.",
+  input_schema: {
+    type: "object",
+    properties: {
+      tickers: {
+        type: "array",
+        items: { type: "string" },
+        description: "Stock tickers to analyze, e.g. [\"NVDA\", \"AMD\"]. One analyst session is dispatched per ticker.",
+      },
+      focus: {
+        type: "string",
+        description: "Optional angle for the analysts to emphasize, e.g. \"margin durability\" or \"inventory build\".",
+      },
+    },
+    required: ["tickers"],
+  },
+};
 
 const AGENT_TOOLSET = {
   type: "agent_toolset_20260401",
@@ -101,11 +106,6 @@ async function uploadSkill(displayTitle: string): Promise<{ skillId: string; ver
 export interface ProvisionStep {
   step: string;
   id: string;
-}
-
-// Used by the workshop stubs below: fails at runtime, satisfies the type checker.
-function todoStub(message: string): { id: string } {
-  throw new Error(message);
 }
 
 /**
@@ -195,25 +195,23 @@ export async function provisionDesk(agentPrefix = "research-desk"): Promise<{ co
   cfg.risk_agent_id = risk.id;
   steps.push({ step: "risk specialist", id: risk.id });
 
-  // TODO(workshop-3): create the filing analyst as a multiagent coordinator.
-  //
-  // A "sub-agent" is just another agent listed on its coordinator's roster.
-  // Replace the stub with `await client.beta.agents.create({ ... } as never)`,
-  // passing exactly:
-  //   name: `${agentPrefix}-filing-analyst`,
-  //   model: MODEL,
-  //   system: loadPrompt("analyst_system.md", { edgar_identity: cfg.edgar_identity }),
-  //   tools: [AGENT_TOOLSET],
-  //   skills: skillsRef,                     // the edgartools manual uploaded above
-  //   multiagent: {
-  //     type: "coordinator",
-  //     agents: [
-  //       { type: "agent", id: financials.id },
-  //       { type: "agent", id: risk.id },
-  //       { type: "self" },
-  //     ],
-  //   },
-  const analyst = todoStub("TODO(workshop-3): create the filing-analyst coordinator agent in src/lib/provision.ts");
+  // The filing analyst is a multiagent coordinator: a "sub-agent" is just
+  // another agent listed on its roster.
+  const analyst = await client.beta.agents.create({
+    name: `${agentPrefix}-filing-analyst`,
+    model: MODEL,
+    system: loadPrompt("analyst_system.md", { edgar_identity: cfg.edgar_identity }),
+    tools: [AGENT_TOOLSET],
+    skills: skillsRef,
+    multiagent: {
+      type: "coordinator",
+      agents: [
+        { type: "agent", id: financials.id },
+        { type: "agent", id: risk.id },
+        { type: "self" },
+      ],
+    },
+  } as never);
   cfg.analyst_agent_id = analyst.id;
   steps.push({ step: "filing analyst (coordinator)", id: analyst.id });
 
@@ -228,9 +226,6 @@ export async function provisionDesk(agentPrefix = "research-desk"): Promise<{ co
 
   // The SAME agent you said hello to gets promoted: agents are versioned, and
   // updates require the current version (optimistic concurrency).
-  if (DISPATCH_TOOL === null) {
-    throw new Error("TODO(workshop-4): define DISPATCH_TOOL at the top of src/lib/provision.ts");
-  }
   const currentHead = (await client.beta.agents.retrieve(cfg.head_agent_id)) as { version?: number };
   const headUpdate = await client.beta.agents.update(cfg.head_agent_id, {
     version: currentHead.version ?? 1,

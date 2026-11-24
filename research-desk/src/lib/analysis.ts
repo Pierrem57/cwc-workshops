@@ -25,11 +25,6 @@ export const MEMORY_MOUNT_INSTRUCTIONS =
 // become directory names under outputs/ — accept only plausible symbols.
 export const TICKER_PATTERN = /^[A-Z][A-Z0-9.-]{0,9}$/;
 
-// Used by the workshop stubs below: fails at runtime, satisfies the type checker.
-function todoStub<T>(message: string): T {
-  throw new Error(message);
-}
-
 export interface AnalysisRecord {
   ticker: string;
   sessionId: string;
@@ -74,26 +69,22 @@ export async function analyzeTicker(
     if (!TICKER_PATTERN.test(record.ticker)) {
       throw new Error(`invalid ticker format: ${record.ticker}`);
     }
-    // TODO(workshop-5): create the analyst session WITH the desk memory attached.
-    //
     // Memory isn't a separate API the agent calls — it's a resource the session
-    // is born with, mounted as a filesystem. Replace the stub with
-    // `await client.beta.sessions.create({ ... } as never)`, passing exactly:
-    //   agent: cfg.analyst_agent_id,
-    //   environment_id: cfg.environment_id,
-    //   title: `Filing analysis: ${record.ticker}`,
-    //   metadata: { ticker: record.ticker, kind: "analysis" },
-    //   resources: [
-    //     {
-    //       type: "memory_store",
-    //       memory_store_id: cfg.memory_store_id,
-    //       access: "read_write",
-    //       instructions: MEMORY_MOUNT_INSTRUCTIONS,
-    //     },
-    //   ],
-    const session = todoStub<{ id: string }>(
-      "TODO(workshop-5): create the analyst session with the memory store attached",
-    );
+    // is born with, mounted as a filesystem.
+    const session = await client.beta.sessions.create({
+      agent: cfg.analyst_agent_id,
+      environment_id: cfg.environment_id,
+      title: `Filing analysis: ${record.ticker}`,
+      metadata: { ticker: record.ticker, kind: "analysis" },
+      resources: [
+        {
+          type: "memory_store",
+          memory_store_id: cfg.memory_store_id,
+          access: "read_write",
+          instructions: MEMORY_MOUNT_INSTRUCTIONS,
+        },
+      ],
+    } as never);
     record.sessionId = session.id;
     record.url = sessionUrl(session.id);
     logEvent("info", "analysis_started", { ticker: record.ticker, session_id: session.id });
